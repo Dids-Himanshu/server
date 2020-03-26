@@ -26,13 +26,15 @@ namespace OCA\DAV\Tests\unit\CalDAV;
 
 use OCA\DAV\CalDAV\CalDavBackend;
 use OCA\DAV\CalDAV\Calendar;
-use OCA\DAV\CalDAV\CalendarImpl;
+use OCA\DAV\CalDAV\CalendarImplV2;
+use OCA\DAV\CalDAV\CalendarObjectImplV2;
 use PHPUnit\Framework\MockObject\MockObject;
+use Sabre\VObject\Component\VCalendar;
 use Test\TestCase;
 
-class CalendarImplTest extends TestCase {
+class CalendarImplV2Test extends TestCase {
 
-	/** @var CalendarImpl */
+	/** @var CalendarImplV2 */
 	private $calendarImpl;
 
 	/** @var Calendar | MockObject */
@@ -55,7 +57,7 @@ class CalendarImplTest extends TestCase {
 		];
 		$this->backend = $this->createMock(CalDavBackend::class);
 
-		$this->calendarImpl = new CalendarImpl($this->calendar,
+		$this->calendarImpl = new CalendarImplV2($this->calendar,
 			$this->calendarInfo, $this->backend);
 	}
 
@@ -82,48 +84,79 @@ class CalendarImplTest extends TestCase {
 		$this->assertEquals($result, ['SEARCHRESULTS']);
 	}
 
-	public function testGetPermissionRead() {
+	/**
+	 * @dataProvider dataTestIsWritable
+	 */
+	public function testGetIsWritable(array $privileges, bool $result) {
 		$this->calendar->expects($this->once())
 			->method('getACL')
 			->with()
-			->willReturn([
-				['privilege' => '{DAV:}read']
-			]);
+			->willReturn($privileges);
 
-		$this->assertEquals(1, $this->calendarImpl->getPermissions());
+		$this->assertEquals($result, $this->calendarImpl->isWriteable());
 	}
 
-	public function testGetPermissionWrite() {
-		$this->calendar->expects($this->once())
-			->method('getACL')
-			->with()
-			->willReturn([
-				['privilege' => '{DAV:}write']
-			]);
-
-		$this->assertEquals(6, $this->calendarImpl->getPermissions());
+	public function dataTestIsWritable(): array {
+		return [
+			[
+				[
+					['privilege' => '{DAV:}read']
+				],
+				false
+			],
+			[
+				[
+					['privilege' => '{DAV:}write']
+				],
+				true
+			],
+			[
+				[
+					['privilege' => '{DAV:}read'],
+					['privilege' => '{DAV:}write']
+				],
+				true
+			],
+			[
+				[
+					['privilege' => '{DAV:}all']
+				],
+				true
+			]
+		];
 	}
 
-	public function testGetPermissionReadWrite() {
-		$this->calendar->expects($this->once())
-			->method('getACL')
-			->with()
-			->willReturn([
-				['privilege' => '{DAV:}read'],
-				['privilege' => '{DAV:}write']
-			]);
+	public function testGetByUri() {
+		$calendarObjectData = ['id' => 'someid', 'calendarid' => 'fancy_id_123'];
+		$calendarObject = new CalendarObjectImplV2($calendarObjectData, $this->backend);
 
-		$this->assertEquals(7, $this->calendarImpl->getPermissions());
+		$this->backend->expects($this->once())
+			->method('getCalendarObject')
+			->willReturn($calendarObjectData);
+		$this->assertEquals($calendarObject, $this->calendarImpl->getByUri('uri'));
 	}
 
-	public function testGetPermissionAll() {
-		$this->calendar->expects($this->once())
-			->method('getACL')
-			->with()
-			->willReturn([
-				['privilege' => '{DAV:}all']
-			]);
+	public function testGetByUriNotFound() {
+		$this->backend->expects($this->once())
+			->method('getCalendarObject')
+			->willReturn(null);
+		$this->assertEquals(null, $this->calendarImpl->getByUri('uri'));
+	}
 
-		$this->assertEquals(31, $this->calendarImpl->getPermissions());
+	public function testCreateCalendarObject() {
+		$calendarObjectDataObject = new VCalendar();
+		$calendarObjectData = ['calendardata' => $calendarObjectDataObject->serialize()];
+		$calendarObject = new CalendarObjectImplV2($calendarObjectData, $this->backend);
+		$this->backend->expects($this->once())
+			->method('createCalendarObject')
+			->with(
+				'fancy_id_123',
+				$this->anything(),
+				$calendarObjectDataObject->serialize()
+			);
+		$this->backend->expects($this->once())
+			->method('getCalendarObject')
+			->willReturn($calendarObjectData);
+		$this->assertEquals($calendarObject, $this->calendarImpl->create($calendarObjectDataObject));
 	}
 }
